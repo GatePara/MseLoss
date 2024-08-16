@@ -1,0 +1,5 @@
+*.bin
+*.txt
+*.om
+build/
+output/e*

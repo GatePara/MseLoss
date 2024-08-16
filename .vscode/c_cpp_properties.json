@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/local/Ascend/ascend-toolkit/latest/include",
+                "/usr/local/Ascend/ascend-toolkit/latest/compiler/tikcpp/tikcfw/impl",
+                "/usr/local/Ascend/ascend-toolkit/latest/compiler/tikcpp/tikcfw/interface",
+                "/usr/local/Ascend/ascend-toolkit/latest/tools/tikicpulib/lib/include",
+                "/usr/local/Ascend/ascend-toolkit/latest/aarch64-linux/include/",
+                "/usr/local/Ascend/ascend-toolkit/latest/aarch64-linux/include/aicpu"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c17",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "linux-gcc-arm64"
+        }
+    ],
+    "version": 4
+}

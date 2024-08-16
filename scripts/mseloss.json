@@ -1,0 +1,31 @@
+[
+{
+  "op": "MseLoss",
+  "input_desc": [
+    {
+      "format": "ND",
+      "shape": [1, 128],
+      "type": "float16"
+    },
+    {
+      "format": "ND",
+      "shape": [1, 128],
+      "type": "float16"
+    }
+  ],
+  "output_desc": [
+    {
+      "format": "ND",
+      "shape": [1,1],
+      "type": "float16"
+    }
+  ],
+  "attr": [
+  {
+    "name": "reduction",
+    "type": "string",
+    "value": "sum"
+  }
+  ]
+}
+]
