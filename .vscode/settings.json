@@ -2,6 +2,7 @@
     "files.associations": {
         "string": "cpp",
         "fstream": "cpp",
-        "streambuf": "cpp"
+        "streambuf": "cpp",
+        "chrono": "cpp"
     }
 }

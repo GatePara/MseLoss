@@ -25,8 +25,17 @@ int length = 0;
 
 const int a = 1;
 const int b = 128;
-const int m = 1;
-const int n = 128;
+const int m = a;
+const int n = b;
+
+const char dataset_path[] = "/root/data/sift/sift_base_1mx256d_f16.bin";
+const char query_path[] = "/root/data/sift/sift_query_10kx256d_f16.bin";
+
+const int dim = b;
+const int data_num = 1000000;
+const int query_num = 10000;
+
+const aclDataType dataType = ACL_FLOAT16;
 
 OperatorDesc CreateOpDesc()
 {
@@ -39,7 +48,6 @@ OperatorDesc CreateOpDesc()
     // if (isDynamic) {
     //     shape = {8, length};
     // }
-    aclDataType dataType = ACL_FLOAT16;
     aclFormat format = ACL_FORMAT_ND;
     OperatorDesc opDesc(opType);
     // printf("inputShape0 size is %ld\n",inputShape0.size());
@@ -53,10 +61,11 @@ OperatorDesc CreateOpDesc()
 bool SetInputData(OpRunner &runner)
 {
     size_t fileSize = 0;
-    printf("input0 size is %ld\n", runner.GetInputSize(0));
+    // printf("input0 size is %ld\n", runner.GetInputSize(0));
     ReadFile("../input/input_x.bin", fileSize, runner.GetInputBuffer<void>(0), runner.GetInputSize(0));
     ReadFile("../input/input_y.bin", fileSize, runner.GetInputBuffer<void>(1), runner.GetInputSize(1));
     INFO_LOG("Set input success");
+
     return true;
 }
 
@@ -74,6 +83,13 @@ bool RunOp()
 
     // Create Runner
     OpRunner opRunner(&opDesc);
+
+    if (!opRunner.SetDataInfo(dim, data_num, query_num, dataType))
+    {
+        ERROR_LOG("Set Data Info failed");
+        return false;
+    }
+
     if (!opRunner.Init())
     {
         ERROR_LOG("Init OpRunner failed");
@@ -87,10 +103,24 @@ bool RunOp()
         return false;
     }
 
+    // Run op prepare
+    if (!opRunner.RunOpPrepare())
+    {
+        ERROR_LOG("Run op prepare failed");
+        return false;
+    }
+
     // Run op
     if (!opRunner.RunOp())
     {
         ERROR_LOG("Run op failed");
+        return false;
+    }
+
+    // Destory Stream
+    if (!opRunner.DestoryStream())
+    {
+        ERROR_LOG("Destory Stream failed");
         return false;
     }
 

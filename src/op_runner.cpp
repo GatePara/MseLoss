@@ -1,12 +1,12 @@
 /**
-* @file op_runner.cpp
-*
-* Copyright (C) 2020. Huawei Technologies Co., Ltd. All rights reserved.
-*
-* This program is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-*/
+ * @file op_runner.cpp
+ *
+ * Copyright (C) 2020. Huawei Technologies Co., Ltd. All rights reserved.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ */
 #include "op_runner.h"
 
 #include <limits>
@@ -26,33 +26,128 @@ OpRunner::OpRunner(OperatorDesc *opDesc) : opDesc_(opDesc)
 
 OpRunner::~OpRunner()
 {
-    for (size_t i = 0; i < numInputs_; ++i) {
+    for (size_t i = 0; i < numInputs_; ++i)
+    {
         (void)aclDestroyDataBuffer(inputBuffers_[i]);
         (void)aclrtFree(devInputs_[i]);
-        if (g_isDevice) {
+        if (g_isDevice)
+        {
             (void)aclrtFree(hostInputs_[i]);
-        } else {
+        }
+        else
+        {
             (void)aclrtFreeHost(hostInputs_[i]);
         }
     }
 
-    for (size_t i = 0; i < numOutputs_; ++i) {
+    for (size_t i = 0; i < numOutputs_; ++i)
+    {
         (void)aclDestroyDataBuffer(outputBuffers_[i]);
         (void)aclrtFree(devOutputs_[i]);
-        if (g_isDevice) {
+        if (g_isDevice)
+        {
             (void)aclrtFree(hostOutputs_[i]);
-        } else {
+        }
+        else
+        {
             (void)aclrtFreeHost(hostOutputs_[i]);
         }
     }
+
+    (void)aclrtFree(devDataSet);
+    (void)aclrtFree(devQuerySet);
+    if (g_isDevice)
+    {
+        (void)aclrtFree(hostDataSet);
+        (void)aclrtFree(hostQuerySet);
+    }
+    else
+    {
+        (void)aclrtFreeHost(hostDataSet);
+        (void)aclrtFreeHost(hostQuerySet);
+    }
+}
+
+bool OpRunner::SetDataInfo(int dim, int data_num, int query_num, aclDataType dataType)
+{
+    dim_ = dim;
+    data_num_ = data_num;
+    query_num_ = query_num;
+    dataType_ = dataType;
+    if (dataType == ACL_FLOAT16 || dataType == ACL_INT16 || dataType == ACL_UINT16 || ACL_BF16)
+    {
+        dataTypeSize_ = 2;
+    }
+    else if (dataType == ACL_FLOAT || dataType == ACL_INT32 || dataType == ACL_UINT32)
+    {
+        dataTypeSize_ = 4;
+    }
+    else
+    {
+        return false;
+    }
+    return true;
 }
 
 bool OpRunner::Init()
 {
-    for (size_t i = 0; i < numInputs_; ++i) {
+    {
+        // 这里为数据集和查询分别整体开辟device/host内存空间
+        auto size = data_num_ * dim_ * dataTypeSize_;
+        auto size_q = query_num_ * dim_ * dataTypeSize_;
+        INFO_LOG("dataset needs %zu MB memrory", size / 1024 / 1024);
+        INFO_LOG("queryset needs %zu MB memrory", size_q / 1024 / 1024);
+        if (aclrtMalloc(&devDataSet, size, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS)
+        {
+            ERROR_LOG("Malloc 1device memory for dataset failed");
+            return false;
+        }
+
+        if (aclrtMalloc(&devQuerySet, size_q, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS)
+        {
+            ERROR_LOG("Malloc 1device memory for queryset failed");
+            return false;
+        }
+
+        if (g_isDevice)
+        {
+            if (aclrtMalloc(&hostDataSet, size, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS)
+            {
+                ERROR_LOG("Malloc 2device memory for dataset failed");
+                return false;
+            }
+            if (aclrtMalloc(&hostQuerySet, size_q, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS)
+            {
+                ERROR_LOG("Malloc 2device memory for queryset failed");
+                return false;
+            }
+        }
+        else
+        {
+            if (aclrtMallocHost(&hostDataSet, size) != ACL_SUCCESS)
+            {
+                ERROR_LOG("Malloc host memory for dataset failed");
+                return false;
+            }
+            if (aclrtMallocHost(&hostQuerySet, size_q) != ACL_SUCCESS)
+            {
+                ERROR_LOG("Malloc host memory for dataset failed");
+                return false;
+            }
+        }
+        if (hostDataSet == nullptr || hostQuerySet == nullptr)
+        {
+            ERROR_LOG("Malloc host memory failed");
+            return false;
+        }
+    }
+
+    for (size_t i = 0; i < numInputs_; ++i)
+    {
         auto size = GetInputSize(i);
         void *devMem = nullptr;
-        if (aclrtMalloc(&devMem, size, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS) {
+        if (aclrtMalloc(&devMem, size, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS)
+        {
             ERROR_LOG("Malloc device memory for input[%zu] failed", i);
             return false;
         }
@@ -60,28 +155,36 @@ bool OpRunner::Init()
         inputBuffers_.emplace_back(aclCreateDataBuffer(devMem, size));
 
         void *hostMem = nullptr;
-        if (g_isDevice) {
-            if (aclrtMalloc(&hostMem, size, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS) {
-                ERROR_LOG("Malloc device memory for input[%zu] failed", i);
-                return false;
-            }
-        } else {
-            if (aclrtMallocHost(&hostMem, size) != ACL_SUCCESS) {
+        if (g_isDevice)
+        {
+            if (aclrtMalloc(&hostMem, size, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS)
+            {
                 ERROR_LOG("Malloc device memory for input[%zu] failed", i);
                 return false;
             }
         }
-        if (hostMem == nullptr) {
+        else
+        {
+            if (aclrtMallocHost(&hostMem, size) != ACL_SUCCESS)
+            {
+                ERROR_LOG("Malloc device memory for input[%zu] failed", i);
+                return false;
+            }
+        }
+        if (hostMem == nullptr)
+        {
             ERROR_LOG("Malloc memory for input[%zu] failed", i);
             return false;
         }
         hostInputs_.emplace_back(hostMem);
     }
 
-    for (size_t i = 0; i < numOutputs_; ++i) {
+    for (size_t i = 0; i < numOutputs_; ++i)
+    {
         auto size = GetOutputSize(i);
         void *devMem = nullptr;
-        if (aclrtMalloc(&devMem, size, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS) {
+        if (aclrtMalloc(&devMem, size, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS)
+        {
             ERROR_LOG("Malloc device memory for output[%zu] failed", i);
             return false;
         }
@@ -89,18 +192,24 @@ bool OpRunner::Init()
         outputBuffers_.emplace_back(aclCreateDataBuffer(devMem, size));
 
         void *hostOutput = nullptr;
-        if (g_isDevice) {
-            if (aclrtMalloc(&hostOutput, size, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS) {
-                ERROR_LOG("Malloc device memory for output[%zu] failed", i);
-                return false;
-            }
-        } else {
-            if (aclrtMallocHost(&hostOutput, size) != ACL_SUCCESS) {
+        if (g_isDevice)
+        {
+            if (aclrtMalloc(&hostOutput, size, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS)
+            {
                 ERROR_LOG("Malloc device memory for output[%zu] failed", i);
                 return false;
             }
         }
-        if (hostOutput == nullptr) {
+        else
+        {
+            if (aclrtMallocHost(&hostOutput, size) != ACL_SUCCESS)
+            {
+                ERROR_LOG("Malloc device memory for output[%zu] failed", i);
+                return false;
+            }
+        }
+        if (hostOutput == nullptr)
+        {
             ERROR_LOG("Malloc host memory for output[%zu] failed", i);
             return false;
         }
@@ -122,7 +231,8 @@ const size_t OpRunner::NumOutputs()
 
 const size_t OpRunner::GetInputSize(size_t index) const
 {
-    if (index >= numInputs_) {
+    if (index >= numInputs_)
+    {
         ERROR_LOG("index out of range. index = %zu, numInputs = %zu", index, numInputs_);
         return 0;
     }
@@ -133,15 +243,18 @@ const size_t OpRunner::GetInputSize(size_t index) const
 std::vector<int64_t> OpRunner::GetInputShape(size_t index) const
 {
     std::vector<int64_t> ret;
-    if (index >= numInputs_) {
+    if (index >= numInputs_)
+    {
         ERROR_LOG("index out of range. index = %zu, numInputs = %zu", index, numInputs_);
         return ret;
     }
 
     auto desc = opDesc_->inputDesc[index];
-    for (size_t i = 0; i < aclGetTensorDescNumDims(desc); ++i) {
+    for (size_t i = 0; i < aclGetTensorDescNumDims(desc); ++i)
+    {
         int64_t dimSize;
-        if (aclGetTensorDescDimV2(desc, i, &dimSize) != ACL_SUCCESS) {
+        if (aclGetTensorDescDimV2(desc, i, &dimSize) != ACL_SUCCESS)
+        {
             ERROR_LOG("get dims from tensor desc failed. dims index = %zu", i);
             ret.clear();
             return ret;
@@ -155,15 +268,18 @@ std::vector<int64_t> OpRunner::GetInputShape(size_t index) const
 std::vector<int64_t> OpRunner::GetOutputShape(size_t index) const
 {
     std::vector<int64_t> ret;
-    if (index >= opDesc_->outputDesc.size()) {
+    if (index >= opDesc_->outputDesc.size())
+    {
         ERROR_LOG("index out of range. index = %zu, numOutputs = %zu", index, numOutputs_);
         return ret;
     }
 
     auto desc = opDesc_->outputDesc[index];
-    for (size_t i = 0; i < aclGetTensorDescNumDims(desc); ++i) {
+    for (size_t i = 0; i < aclGetTensorDescNumDims(desc); ++i)
+    {
         int64_t dimSize;
-        if (aclGetTensorDescDimV2(desc, i, &dimSize) != ACL_SUCCESS) {
+        if (aclGetTensorDescDimV2(desc, i, &dimSize) != ACL_SUCCESS)
+        {
             ERROR_LOG("get dims from tensor desc failed. dims index = %zu", i);
             ret.clear();
             return ret;
@@ -175,7 +291,8 @@ std::vector<int64_t> OpRunner::GetOutputShape(size_t index) const
 
 size_t OpRunner::GetInputElementCount(size_t index) const
 {
-    if (index >= opDesc_->inputDesc.size()) {
+    if (index >= opDesc_->inputDesc.size())
+    {
         ERROR_LOG("index out of range. index = %zu, numInputs = %zu", index, numInputs_);
         return 0;
     }
@@ -185,7 +302,8 @@ size_t OpRunner::GetInputElementCount(size_t index) const
 
 size_t OpRunner::GetOutputElementCount(size_t index) const
 {
-    if (index >= opDesc_->outputDesc.size()) {
+    if (index >= opDesc_->outputDesc.size())
+    {
         ERROR_LOG("index out of range. index = %zu, numOutputs = %zu", index, numOutputs_);
         return 0;
     }
@@ -195,7 +313,8 @@ size_t OpRunner::GetOutputElementCount(size_t index) const
 
 size_t OpRunner::GetOutputSize(size_t index) const
 {
-    if (index >= opDesc_->outputDesc.size()) {
+    if (index >= opDesc_->outputDesc.size())
+    {
         ERROR_LOG("index out of range. index = %zu, numOutputs = %zu", index, numOutputs_);
         return 0;
     }
@@ -203,27 +322,36 @@ size_t OpRunner::GetOutputSize(size_t index) const
     return aclGetTensorDescSize(opDesc_->outputDesc[index]);
 }
 
-bool OpRunner::RunOp()
+bool OpRunner::RunOpPrepare()
 {
-    for (size_t i = 0; i < numInputs_; ++i) {
+    for (size_t i = 0; i < numInputs_; ++i)
+    {
         auto size = GetInputSize(i);
         aclrtMemcpyKind kind = ACL_MEMCPY_HOST_TO_DEVICE;
-        if (g_isDevice) {
+        if (g_isDevice)
+        {
             kind = ACL_MEMCPY_DEVICE_TO_DEVICE;
         }
-        if (aclrtMemcpy(devInputs_[i], size, hostInputs_[i], size, kind) != ACL_SUCCESS) {
+        if (aclrtMemcpy(devInputs_[i], size, hostInputs_[i], size, kind) != ACL_SUCCESS)
+        {
             ERROR_LOG("Copy input[%zu] failed", i);
             return false;
         }
         INFO_LOG("Copy input[%zu] success", i);
     }
 
-    aclrtStream stream = nullptr;
-    if (aclrtCreateStream(&stream) != ACL_SUCCESS) {
+    if (aclrtCreateStream(&stream) != ACL_SUCCESS)
+    {
         ERROR_LOG("Create stream failed");
         return false;
     }
     INFO_LOG("Create stream success");
+
+    return true;
+}
+
+bool OpRunner::RunOp()
+{
 
     auto ret = aclopExecuteV2(opDesc_->opType.c_str(),
                               numInputs_,
@@ -235,51 +363,66 @@ bool OpRunner::RunOp()
                               opDesc_->opAttr,
                               stream);
     if (ret == ACL_ERROR_OP_TYPE_NOT_MATCH || ret == ACL_ERROR_OP_INPUT_NOT_MATCH ||
-        ret == ACL_ERROR_OP_OUTPUT_NOT_MATCH || ret == ACL_ERROR_OP_ATTR_NOT_MATCH) {
+        ret == ACL_ERROR_OP_OUTPUT_NOT_MATCH || ret == ACL_ERROR_OP_ATTR_NOT_MATCH)
+    {
         ERROR_LOG("[%s] op with the given description is not compiled. Please run atc first, errorCode is %d",
-            opDesc_->opType.c_str(), static_cast<int32_t>(ret));
+                  opDesc_->opType.c_str(), static_cast<int32_t>(ret));
         (void)aclrtDestroyStream(stream);
         return false;
-    } else if (ret != ACL_SUCCESS) {
+    }
+    else if (ret != ACL_SUCCESS)
+    {
         (void)aclrtDestroyStream(stream);
         ERROR_LOG("Execute %s failed. errorCode is %d", opDesc_->opType.c_str(), static_cast<int32_t>(ret));
         return false;
     }
     INFO_LOG("Execute %s success", opDesc_->opType.c_str());
 
-    if (aclrtSynchronizeStream(stream) != ACL_SUCCESS) {
+    if (aclrtSynchronizeStream(stream) != ACL_SUCCESS)
+    {
         ERROR_LOG("Synchronize stream failed");
         (void)aclrtDestroyStream(stream);
         return false;
     }
     INFO_LOG("Synchronize stream success");
 
-    for (size_t i = 0; i < numOutputs_; ++i) {
+    for (size_t i = 0; i < numOutputs_; ++i)
+    {
         auto size = GetOutputSize(i);
         aclrtMemcpyKind kind = ACL_MEMCPY_DEVICE_TO_HOST;
-        if (g_isDevice) {
+        if (g_isDevice)
+        {
             kind = ACL_MEMCPY_DEVICE_TO_DEVICE;
         }
-        if (aclrtMemcpy(hostOutputs_[i], size, devOutputs_[i], size, kind) != ACL_SUCCESS) {
+        if (aclrtMemcpy(hostOutputs_[i], size, devOutputs_[i], size, kind) != ACL_SUCCESS)
+        {
             INFO_LOG("Copy output[%zu] success", i);
             (void)aclrtDestroyStream(stream);
             return false;
         }
         INFO_LOG("Copy output[%zu] success", i);
+        PrintOutput(i);
+        printf("\n");
     }
 
+    return true;
+}
+
+bool OpRunner::DestoryStream()
+{
     (void)aclrtDestroyStream(stream);
     return true;
 }
 
-
-template<typename T>
+template <typename T>
 void DoPrintData(const T *data, size_t count, size_t elementsPerRow)
 {
     assert(elementsPerRow != 0);
-    for (size_t i = 0; i < count; ++i) {
+    for (size_t i = 0; i < count; ++i)
+    {
         std::cout << std::setw(10) << data[i];
-        if (i % elementsPerRow == elementsPerRow - 1) {
+        if (i % elementsPerRow == elementsPerRow - 1)
+        {
             std::cout << std::endl;
         }
     }
@@ -288,9 +431,11 @@ void DoPrintData(const T *data, size_t count, size_t elementsPerRow)
 void DoPrintFp16Data(const aclFloat16 *data, size_t count, size_t elementsPerRow)
 {
     assert(elementsPerRow != 0);
-    for (size_t i = 0; i < count; ++i) {
+    for (size_t i = 0; i < count; ++i)
+    {
         std::cout << std::setw(10) << std::setprecision(4) << aclFloat16ToFloat(data[i]);
-        if (i % elementsPerRow == elementsPerRow - 1) {
+        if (i % elementsPerRow == elementsPerRow - 1)
+        {
             std::cout << std::endl;
         }
     }
@@ -298,56 +443,59 @@ void DoPrintFp16Data(const aclFloat16 *data, size_t count, size_t elementsPerRow
 
 void PrintData(const void *data, size_t count, aclDataType dataType, size_t elementsPerRow)
 {
-    if (data == nullptr) {
+    if (data == nullptr)
+    {
         ERROR_LOG("Print data failed. data is nullptr");
         return;
     }
 
-    switch (dataType) {
-        case ACL_BOOL:
-            DoPrintData(reinterpret_cast<const bool *>(data), count, elementsPerRow);
-            break;
-        case ACL_INT8:
-            DoPrintData(reinterpret_cast<const int8_t *>(data), count, elementsPerRow);
-            break;
-        case ACL_UINT8:
-            DoPrintData(reinterpret_cast<const uint8_t *>(data), count, elementsPerRow);
-            break;
-        case ACL_INT16:
-            DoPrintData(reinterpret_cast<const int16_t *>(data), count, elementsPerRow);
-            break;
-        case ACL_UINT16:
-            DoPrintData(reinterpret_cast<const uint16_t *>(data), count, elementsPerRow);
-            break;
-        case ACL_INT32:
-            DoPrintData(reinterpret_cast<const int32_t *>(data), count, elementsPerRow);
-            break;
-        case ACL_UINT32:
-            DoPrintData(reinterpret_cast<const uint32_t *>(data), count, elementsPerRow);
-            break;
-        case ACL_INT64:
-            DoPrintData(reinterpret_cast<const int64_t *>(data), count, elementsPerRow);
-            break;
-        case ACL_UINT64:
-            DoPrintData(reinterpret_cast<const uint64_t *>(data), count, elementsPerRow);
-            break;
-        case ACL_FLOAT16:
-            DoPrintFp16Data(reinterpret_cast<const aclFloat16 *>(data), count, elementsPerRow);
-            break;
-        case ACL_FLOAT:
-            DoPrintData(reinterpret_cast<const float *>(data), count, elementsPerRow);
-            break;
-        case ACL_DOUBLE:
-            DoPrintData(reinterpret_cast<const double *>(data), count, elementsPerRow);
-            break;
-        default:
-            ERROR_LOG("Unsupported type: %d", dataType);
+    switch (dataType)
+    {
+    case ACL_BOOL:
+        DoPrintData(reinterpret_cast<const bool *>(data), count, elementsPerRow);
+        break;
+    case ACL_INT8:
+        DoPrintData(reinterpret_cast<const int8_t *>(data), count, elementsPerRow);
+        break;
+    case ACL_UINT8:
+        DoPrintData(reinterpret_cast<const uint8_t *>(data), count, elementsPerRow);
+        break;
+    case ACL_INT16:
+        DoPrintData(reinterpret_cast<const int16_t *>(data), count, elementsPerRow);
+        break;
+    case ACL_UINT16:
+        DoPrintData(reinterpret_cast<const uint16_t *>(data), count, elementsPerRow);
+        break;
+    case ACL_INT32:
+        DoPrintData(reinterpret_cast<const int32_t *>(data), count, elementsPerRow);
+        break;
+    case ACL_UINT32:
+        DoPrintData(reinterpret_cast<const uint32_t *>(data), count, elementsPerRow);
+        break;
+    case ACL_INT64:
+        DoPrintData(reinterpret_cast<const int64_t *>(data), count, elementsPerRow);
+        break;
+    case ACL_UINT64:
+        DoPrintData(reinterpret_cast<const uint64_t *>(data), count, elementsPerRow);
+        break;
+    case ACL_FLOAT16:
+        DoPrintFp16Data(reinterpret_cast<const aclFloat16 *>(data), count, elementsPerRow);
+        break;
+    case ACL_FLOAT:
+        DoPrintData(reinterpret_cast<const float *>(data), count, elementsPerRow);
+        break;
+    case ACL_DOUBLE:
+        DoPrintData(reinterpret_cast<const double *>(data), count, elementsPerRow);
+        break;
+    default:
+        ERROR_LOG("Unsupported type: %d", dataType);
     }
 }
 
 void OpRunner::PrintInput(size_t index, size_t numElementsPerRow)
 {
-    if (index >= numInputs_) {
+    if (index >= numInputs_)
+    {
         ERROR_LOG("index out of range. index = %zu, numOutputs = %zu", index, numInputs_);
         return;
     }
@@ -358,7 +506,8 @@ void OpRunner::PrintInput(size_t index, size_t numElementsPerRow)
 
 void OpRunner::PrintOutput(size_t index, size_t numElementsPerRow)
 {
-    if (index >= numOutputs_) {
+    if (index >= numOutputs_)
+    {
         ERROR_LOG("index out of range. index = %zu, numOutputs = %zu", index, numOutputs_);
         return;
     }

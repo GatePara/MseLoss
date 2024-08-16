@@ -1,12 +1,12 @@
 /**
-* @file op_runner.h
-*
-* Copyright (C) 2020. Huawei Technologies Co., Ltd. All rights reserved.
-*
-* This program is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-*/
+ * @file op_runner.h
+ *
+ * Copyright (C) 2020. Huawei Technologies Co., Ltd. All rights reserved.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ */
 #ifndef OP_RUNNER_H
 #define OP_RUNNER_H
 
@@ -17,7 +17,8 @@
 /**
  * Op Runner
  */
-class OpRunner {
+class OpRunner
+{
 public:
     /**
      * @brief Constructor
@@ -31,8 +32,8 @@ public:
     virtual ~OpRunner();
 
     /**
-    * @brief Init op runner
-    */
+     * @brief Init op runner
+     */
     bool Init();
 
     /**
@@ -95,10 +96,11 @@ public:
      * @param [in] index: input index
      * @return host address of the input
      */
-    template<typename T>
+    template <typename T>
     T *GetInputBuffer(size_t index)
     {
-        if (index >= numInputs_) {
+        if (index >= numInputs_)
+        {
             ERROR_LOG("index out of range. index = %zu, numInputs = %zu", index, numInputs_);
             return nullptr;
         }
@@ -111,10 +113,11 @@ public:
      * @param [in] index: output index
      * @return host address of the output
      */
-    template<typename T>
+    template <typename T>
     const T *GetOutputBuffer(size_t index)
     {
-        if (index >= numOutputs_) {
+        if (index >= numOutputs_)
+        {
             ERROR_LOG("index out of range. index = %zu, numOutputs = %zu", index, numOutputs_);
             return nullptr;
         }
@@ -122,18 +125,18 @@ public:
         return reinterpret_cast<T *>(hostOutputs_[index]);
     }
 
-     /**
-      * @brief Print readable input by index
-      * @param [in] index: input index
-      * @param [in] elementsPerRow: number of elements per row
-      */
+    /**
+     * @brief Print readable input by index
+     * @param [in] index: input index
+     * @param [in] elementsPerRow: number of elements per row
+     */
     void PrintInput(size_t index, size_t elementsPerRow = 16);
 
     /**
-      * @brief Print readable output by index
-      * @param [in] index: output index
-      * @param [in] elementsPerRow: number of elements per row
-      */
+     * @brief Print readable output by index
+     * @param [in] index: output index
+     * @param [in] elementsPerRow: number of elements per row
+     */
     void PrintOutput(size_t index, size_t elementsPerRow = 16);
 
     /**
@@ -154,9 +157,21 @@ public:
      */
     bool RunOp();
 
+    bool RunOpPrepare();
+
+    bool DestoryStream();
+
+    bool SetDataInfo(int dim, int data_num, int query_num, aclDataType dataType);
+
 private:
     size_t numInputs_;
     size_t numOutputs_;
+
+    int dim_;
+    int data_num_;
+    int query_num_;
+    aclDataType dataType_;
+    int dataTypeSize_;
 
     std::vector<aclDataBuffer *> inputBuffers_;
     std::vector<aclDataBuffer *> outputBuffers_;
@@ -164,9 +179,17 @@ private:
     std::vector<void *> devInputs_;
     std::vector<void *> devOutputs_;
 
+    void *devDataSet{nullptr};
+    void *devQuerySet{nullptr};
+
+    void *hostDataSet{nullptr};
+    void *hostQuerySet{nullptr};
+
     std::vector<void *> hostInputs_;
     std::vector<void *> hostOutputs_;
     OperatorDesc *opDesc_;
+
+    aclrtStream stream{nullptr};
 };
 
 #endif // OP_RUNNER_H
