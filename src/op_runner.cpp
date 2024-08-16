@@ -13,10 +13,13 @@
 #include <cassert>
 #include "acl/acl_op_compiler.h"
 #include "common.h"
+#include <chrono>
 
 using namespace std;
 
 extern bool g_isDevice;
+
+const int compute_ratio = 100;
 
 OpRunner::OpRunner(OperatorDesc *opDesc) : opDesc_(opDesc)
 {
@@ -74,7 +77,8 @@ bool OpRunner::SetDataInfo(int dim, int data_num, int query_num, aclDataType dat
     data_num_ = data_num;
     query_num_ = query_num;
     dataType_ = dataType;
-    if (dataType == ACL_FLOAT16 || dataType == ACL_INT16 || dataType == ACL_UINT16 || ACL_BF16)
+
+    if (dataType == ACL_FLOAT16 || dataType == ACL_INT16 || dataType == ACL_UINT16 || dataType == ACL_BF16)
     {
         dataTypeSize_ = 2;
     }
@@ -86,6 +90,9 @@ bool OpRunner::SetDataInfo(int dim, int data_num, int query_num, aclDataType dat
     {
         return false;
     }
+    vector_size_ = dim * dataTypeSize_;
+    // results_.reserve(data_num * query_num * dataTypeSize_);
+
     return true;
 }
 
@@ -93,8 +100,8 @@ bool OpRunner::Init()
 {
     {
         // 这里为数据集和查询分别整体开辟device/host内存空间
-        auto size = data_num_ * dim_ * dataTypeSize_;
-        auto size_q = query_num_ * dim_ * dataTypeSize_;
+        auto size = GetDataSetSize();
+        auto size_q = GetQuerySetSize();
         INFO_LOG("dataset needs %zu MB memrory", size / 1024 / 1024);
         INFO_LOG("queryset needs %zu MB memrory", size_q / 1024 / 1024);
         if (aclrtMalloc(&devDataSet, size, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS)
@@ -324,6 +331,25 @@ size_t OpRunner::GetOutputSize(size_t index) const
 
 bool OpRunner::RunOpPrepare()
 {
+    {
+        aclrtMemcpyKind kind = ACL_MEMCPY_HOST_TO_DEVICE;
+        if (g_isDevice)
+        {
+            kind = ACL_MEMCPY_DEVICE_TO_DEVICE;
+        }
+        if (aclrtMemcpy(devDataSet, GetDataSetSize(), hostDataSet, GetDataSetSize(), kind) != ACL_SUCCESS)
+        {
+            ERROR_LOG("Copy dataset failed");
+            return false;
+        }
+        if (aclrtMemcpy(devQuerySet, GetQuerySetSize(), hostQuerySet, GetQuerySetSize(), kind) != ACL_SUCCESS)
+        {
+            ERROR_LOG("Copy queryset failed");
+            return false;
+        }
+        INFO_LOG("Copy input success");
+    }
+
     for (size_t i = 0; i < numInputs_; ++i)
     {
         auto size = GetInputSize(i);
@@ -352,58 +378,78 @@ bool OpRunner::RunOpPrepare()
 
 bool OpRunner::RunOp()
 {
+    INFO_LOG("vector_size: %d", vector_size_);
+    auto start = std::chrono::high_resolution_clock::now();
 
-    auto ret = aclopExecuteV2(opDesc_->opType.c_str(),
-                              numInputs_,
-                              opDesc_->inputDesc.data(),
-                              inputBuffers_.data(),
-                              numOutputs_,
-                              opDesc_->outputDesc.data(),
-                              outputBuffers_.data(),
-                              opDesc_->opAttr,
-                              stream);
-    if (ret == ACL_ERROR_OP_TYPE_NOT_MATCH || ret == ACL_ERROR_OP_INPUT_NOT_MATCH ||
-        ret == ACL_ERROR_OP_OUTPUT_NOT_MATCH || ret == ACL_ERROR_OP_ATTR_NOT_MATCH)
+    for (int q_id = 0; q_id < query_num_ / compute_ratio; q_id++)
     {
-        ERROR_LOG("[%s] op with the given description is not compiled. Please run atc first, errorCode is %d",
-                  opDesc_->opType.c_str(), static_cast<int32_t>(ret));
-        (void)aclrtDestroyStream(stream);
-        return false;
-    }
-    else if (ret != ACL_SUCCESS)
-    {
-        (void)aclrtDestroyStream(stream);
-        ERROR_LOG("Execute %s failed. errorCode is %d", opDesc_->opType.c_str(), static_cast<int32_t>(ret));
-        return false;
-    }
-    INFO_LOG("Execute %s success", opDesc_->opType.c_str());
-
-    if (aclrtSynchronizeStream(stream) != ACL_SUCCESS)
-    {
-        ERROR_LOG("Synchronize stream failed");
-        (void)aclrtDestroyStream(stream);
-        return false;
-    }
-    INFO_LOG("Synchronize stream success");
-
-    for (size_t i = 0; i < numOutputs_; ++i)
-    {
-        auto size = GetOutputSize(i);
-        aclrtMemcpyKind kind = ACL_MEMCPY_DEVICE_TO_HOST;
-        if (g_isDevice)
+        // INFO_LOG("Origin buffer: pointer: %p size: %d",aclGetDataBufferAddr(inputBuffers_[0]),aclGetDataBufferSize(inputBuffers_[0]));
+        aclUpdateDataBuffer(inputBuffers_[0], devQuerySet + q_id * vector_size_, vector_size_);
+        // INFO_LOG("Changed buffer: pointer: %p size: %d",aclGetDataBufferAddr(inputBuffers_[0]),aclGetDataBufferSize(inputBuffers_[0]));
+        for (int data_id = 0; data_id < data_num_ / compute_ratio ; data_id++)
         {
-            kind = ACL_MEMCPY_DEVICE_TO_DEVICE;
+            aclUpdateDataBuffer(inputBuffers_[1], devDataSet + data_id * vector_size_, vector_size_);
+            auto ret = aclopExecuteV2(opDesc_->opType.c_str(),
+                                      numInputs_,
+                                      opDesc_->inputDesc.data(),
+                                      inputBuffers_.data(),
+                                      numOutputs_,
+                                      opDesc_->outputDesc.data(),
+                                      outputBuffers_.data(),
+                                      opDesc_->opAttr,
+                                      stream);
+            // if (ret == ACL_ERROR_OP_TYPE_NOT_MATCH || ret == ACL_ERROR_OP_INPUT_NOT_MATCH ||
+            //     ret == ACL_ERROR_OP_OUTPUT_NOT_MATCH || ret == ACL_ERROR_OP_ATTR_NOT_MATCH)
+            // {
+            //     ERROR_LOG("[%s] op with the given description is not compiled. Please run atc first, errorCode is %d",
+            //               opDesc_->opType.c_str(), static_cast<int32_t>(ret));
+            //     (void)aclrtDestroyStream(stream);
+            //     return false;
+            // }
+            
+            if (ret != ACL_SUCCESS)
+            {
+                (void)aclrtDestroyStream(stream);
+                ERROR_LOG("Execute %s failed. errorCode is %d", opDesc_->opType.c_str(), static_cast<int32_t>(ret));
+                return false;
+            }
+            // INFO_LOG("Execute %s success", opDesc_->opType.c_str());
+
+            if (aclrtSynchronizeStream(stream) != ACL_SUCCESS)
+            {
+                ERROR_LOG("Synchronize stream failed");
+                (void)aclrtDestroyStream(stream);
+                return false;
+            }
+            // INFO_LOG("Synchronize stream success");
+
+            for (size_t i = 0; i < numOutputs_; ++i)
+            {
+                auto size = GetOutputSize(i);
+                aclrtMemcpyKind kind = ACL_MEMCPY_DEVICE_TO_HOST;
+                if (g_isDevice)
+                {
+                    kind = ACL_MEMCPY_DEVICE_TO_DEVICE;
+                }
+                if (aclrtMemcpy(hostOutputs_[i], size, devOutputs_[i], size, kind) != ACL_SUCCESS)
+                {
+                    INFO_LOG("Copy output[%zu] failed", i);
+                    (void)aclrtDestroyStream(stream);
+                    return false;
+                }
+                // INFO_LOG("Copy output[%zu] success", i);
+                // PrintOutput(i);
+                // printf(" ");
+            }
         }
-        if (aclrtMemcpy(hostOutputs_[i], size, devOutputs_[i], size, kind) != ACL_SUCCESS)
-        {
-            INFO_LOG("Copy output[%zu] success", i);
-            (void)aclrtDestroyStream(stream);
-            return false;
-        }
-        INFO_LOG("Copy output[%zu] success", i);
-        PrintOutput(i);
-        printf("\n");
+        // printf("\n");
     }
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    INFO_LOG("Time: %d ms", duration_ms.count());
+    // time count by second
+    auto duration_s = std::chrono::duration_cast<std::chrono::seconds>(end - start);
+    INFO_LOG("Time: %d s", duration_s.count());
 
     return true;
 }

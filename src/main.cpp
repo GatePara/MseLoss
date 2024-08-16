@@ -28,8 +28,8 @@ const int b = 128;
 const int m = a;
 const int n = b;
 
-const char dataset_path[] = "/root/data/sift/sift_base_1mx256d_f16.bin";
-const char query_path[] = "/root/data/sift/sift_query_10kx256d_f16.bin";
+const char dataset_path[] = "/root/data/sift/sift_base_1mx256d_f16_scale.bin";
+const char query_path[] = "/root/data/sift/sift_query_10kx256d_f16_scale.bin";
 
 const int dim = b;
 const int data_num = 1000000;
@@ -64,6 +64,8 @@ bool SetInputData(OpRunner &runner)
     // printf("input0 size is %ld\n", runner.GetInputSize(0));
     ReadFile("../input/input_x.bin", fileSize, runner.GetInputBuffer<void>(0), runner.GetInputSize(0));
     ReadFile("../input/input_y.bin", fileSize, runner.GetInputBuffer<void>(1), runner.GetInputSize(1));
+    ReadFile(dataset_path,fileSize,runner.GetHostDataSet(),runner.GetDataSetSize());
+    ReadFile(query_path,fileSize,runner.GetHostQuerySet(),runner.GetQuerySetSize());
     INFO_LOG("Set input success");
 
     return true;

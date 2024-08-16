@@ -163,6 +163,26 @@ public:
 
     bool SetDataInfo(int dim, int data_num, int query_num, aclDataType dataType);
 
+    void *GetHostDataSet()
+    {
+        return hostDataSet;
+    }
+
+    void *GetHostQuerySet()
+    {
+        return hostQuerySet;
+    }
+
+    inline size_t GetDataSetSize()
+    {
+        return (size_t)(data_num_ * dataTypeSize_ * dim_);
+    }
+
+    inline size_t GetQuerySetSize()
+    {
+        return (size_t)(query_num_ * dataTypeSize_ * dim_);
+    }
+
 private:
     size_t numInputs_;
     size_t numOutputs_;
@@ -172,6 +192,7 @@ private:
     int query_num_;
     aclDataType dataType_;
     int dataTypeSize_;
+    int vector_size_;
 
     std::vector<aclDataBuffer *> inputBuffers_;
     std::vector<aclDataBuffer *> outputBuffers_;
@@ -184,6 +205,8 @@ private:
 
     void *hostDataSet{nullptr};
     void *hostQuerySet{nullptr};
+
+    std::vector<char> results_;
 
     std::vector<void *> hostInputs_;
     std::vector<void *> hostOutputs_;

@@ -49,5 +49,5 @@ function main {
     cd $CURRENT_DIR
     python3 scripts/verify_result.py output/output_z.bin output/golden.bin
 }
-check_soc_version
+
 main
