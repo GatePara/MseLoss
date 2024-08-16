@@ -1,5 +1,5 @@
 *.bin
-*.txt
+*log.txt
 *.om
 build/
 output/e*
